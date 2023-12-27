@@ -1,0 +1,17 @@
+{
+    "concorrentes" : [
+        {
+            "url": "https://www.barbosasupermercados.com.br/",
+            "tipo_scraping": "BARBOSA"
+        },
+        {
+            "url": "https://bomlugarzaia.lojaqui.com.br/",
+            "tipo_scraping": "BOM_LUGAR"
+        }
+    ],
+    "items_para_pesquisa": [
+        "Tapioca da Terrinha 500g",
+        "Toddynho Levinho 200ml",
+        "DOVE ORIGINAL 90G"
+    ]
+}
