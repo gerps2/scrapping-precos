@@ -1,12 +1,16 @@
 {
+    "buscarPrecoPorRequest": true,
+    "buscaPorCodigoDeBarras": true,
     "concorrentes" : [
         {
             "url": "https://www.barbosasupermercados.com.br/",
-            "tipo_scraping": "BARBOSA"
+            "tipo_scraping": "BARBOSA",
+            "nome": "Barbosa"
         },
         {
             "url": "https://bomlugarzaia.lojaqui.com.br/",
-            "tipo_scraping": "BOM_LUGAR"
+            "tipo_scraping": "BOM_LUGAR",
+            "nome": "Bom Lugar"
         }
     ],
     "items_para_pesquisa": [

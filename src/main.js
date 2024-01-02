@@ -1,57 +1,101 @@
-var OrquestradorDeScraping = require('./facilitadores/orquestrador');
-var scrapingConcorrenteBarbosa = require('./facilitadores/concorrentesEstrategias/concorrenteBarbosa');
-var scrapingConcorrenteBomLugar = require('./facilitadores/concorrentesEstrategias/concorrenteBomLugar');
 const fs = require('fs');
 const xlsx = require('xlsx');
-
-var orquestrador = new OrquestradorDeScraping();
-
-// Adicionando estratégias ao orquestrador
-orquestrador.adicionarEstrategia('BOM_LUGAR', scrapingConcorrenteBomLugar);
-orquestrador.adicionarEstrategia('BARBOSA', scrapingConcorrenteBarbosa);
+const path = require('path');
+const OrquestradorDeScraping = require('./facilitadores/orquestrador');
+const { scrapingPorRequestConcorrenteBarbosa, scrapingPorRequestConcorrenteBomLugar } = require('./facilitadores/concorrentesEstrategiasPorRequest');
+const { scrapingConcorrenteBarbosa, scrapingConcorrenteBomLugar } = require('./facilitadores/concorrentesEstrategias');
 
 let rawData = fs.readFileSync('./config.json');
 let config = JSON.parse(rawData);
-
+let orquestrador = new OrquestradorDeScraping();
 let resultados = {};
 
-async function buscaPrecosConcorrentes() {
-    for (let item of config.items_para_pesquisa) {
-        let precos = [];
-
-        for (let concorrente of config.concorrentes) {
-            let preco = await orquestrador.executarEstrategia(concorrente.tipo_scraping, concorrente, item);
-            precos.push({ "concorrente": concorrente.tipo_scraping, "preco": preco });
-        }
-
-        resultados[item] = precos;
+function adicionandoEstrategiasPorConfig(){
+    if(config.buscarPrecoPorRequest){
+        orquestrador.adicionarEstrategia('BOM_LUGAR', scrapingPorRequestConcorrenteBomLugar);
+        orquestrador.adicionarEstrategia('BARBOSA', scrapingPorRequestConcorrenteBarbosa);
+    }else{
+        orquestrador.adicionarEstrategia('BOM_LUGAR', scrapingConcorrenteBomLugar);
+        orquestrador.adicionarEstrategia('BARBOSA', scrapingConcorrenteBarbosa);
     }
 }
 
-buscaPrecosConcorrentes().then(() => {
-    let data = JSON.stringify(resultados, null, 2);
-    fs.writeFileSync('./resultados.json', data);
+function buscarInformacoesProdutosPorPlanilha(){
+    const arquivoXLSX = 'assets/produtos.xlsx';
 
-    let rawData1 =fs.readFileSync('./resultados.json');
-    let jsonData = JSON.parse(rawData1);
+    if (!fs.existsSync(arquivoXLSX)) throw new Error('O arquivo XLSX não foi encontrado.');
 
-    let worksheetData = [];
+    const arquivo = xlsx.readFile(arquivoXLSX);
+    const primeiraPlanilha = arquivo.Sheets[arquivo.SheetNames[0]];
+    const dados = xlsx.utils.sheet_to_json(primeiraPlanilha);
 
-    for (const produto in jsonData) {
-        jsonData[produto].forEach(item => {
-            worksheetData.push({
-                Produto: produto,
-                Concorrente: item.concorrente,
-                Preco: item.preco
+    return dados;
+}
+
+function codigoBarrasDosProdutos(){
+    let produtos = buscarInformacoesProdutosPorPlanilha()
+    return produtos.map(produto => produto.codigoBarras);
+}
+
+function salvaOsResultadosNumExcel(){
+    const newWorkbook = xlsx.utils.book_new();
+    let dataForSheet;
+
+    if(config.buscaPorCodigoDeBarras){
+        const dadosOriginais = buscarInformacoesProdutosPorPlanilha();
+        dataForSheet = dadosOriginais.map((dadoOriginal) => {
+          const produtoAtualizado = { ...dadoOriginal };
+          config.concorrentes.forEach((concorrente) => {
+            const resultadoConcorrente = resultados[concorrente.nome];
+            const produtoEncontrado = resultadoConcorrente.find(
+              (r) => r.produto === dadoOriginal.codigoBarras
+            );
+
+            produtoAtualizado[concorrente.nome] =
+              produtoEncontrado && produtoEncontrado.preco > 0
+                ? produtoEncontrado.preco
+                : "Não disponível";
+          });
+          return produtoAtualizado;
+        });
+    }else{
+        dataForSheet = config.items_para_pesquisa.map(nomeProduto => {
+            const produto = { nomeProduto };
+            config.concorrentes.forEach(concorrente => {
+                const preco = resultados[concorrente.nome] && resultados[concorrente.nome][nomeProduto];
+                produto[concorrente.nome] = preco || 'Não disponível';
             });
+            return produto;
         });
     }
 
-    const worksheet = xlsx.utils.json_to_sheet(worksheetData);
-    const workbook = xlsx.utils.book_new();
-    xlsx.utils.book_append_sheet(workbook, worksheet, "precos");
-    xlsx.writeFile(workbook, 'precos.xlsx');
-    console.log('Resultados salvos em resultados.json');
+    const newWorksheet = xlsx.utils.json_to_sheet(dataForSheet);
+    xlsx.utils.book_append_sheet(newWorkbook, newWorksheet, 'Resultados');
+
+    const resultadosDir = path.join(__dirname, 'assets/resultados');
+    if (!fs.existsSync(resultadosDir)) {
+        fs.mkdirSync(resultadosDir, { recursive: true });
+    }
+
+    const filePath = path.join(resultadosDir, 'resultados_precos.xlsx');
+    xlsx.writeFile(newWorkbook, filePath);
+    console.log(`Arquivo salvo em: ${filePath}`);
+}
+
+async function buscaPrecosConcorrentes() {
+    adicionandoEstrategiasPorConfig();
+    let produtos = config.buscaPorCodigoDeBarras ? codigoBarrasDosProdutos() : config.items_para_pesquisa
+
+    const buscaPrecos = config.concorrentes.map(concorrente => 
+        orquestrador.executarEstrategia(concorrente.tipo_scraping, concorrente, produtos)
+                    .then(precos => resultados[concorrente.nome] = precos)
+    );
+
+    await Promise.all(buscaPrecos);
+}
+
+buscaPrecosConcorrentes().then(() => {
+    salvaOsResultadosNumExcel()
 }).catch(error => {
     console.error('Erro durante o scraping:', error);
 });
